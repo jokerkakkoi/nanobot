@@ -1,0 +1,12 @@
+{
+    "type": "text",
+    "callBackUrl": "https://impre.zdxlz.com/im-external/v1/webhook/send?key=1234567890", 
+    "callBackMethod": "POST", 
+    "phone":"18800001111",
+    "groupId":"123456",
+    "tenantId": 1,   
+    "robotId":"aaa123456",
+    "textMsg": {
+                "content": "查询合肥天气"
+        }
+}
