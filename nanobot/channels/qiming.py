@@ -5,18 +5,21 @@ import json
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from nanobot.bus.queue import MessageBus
+from nanobot.channels import BaseChannel
 from nanobot.config.schema import QimingConfig
 from nanobot.bus.events import OutboundMessage
 
 try:
     # Import packages required for receive qiming webhook requests
-    from fastapi import FastAPI, HTTPException, Request
-    from fastapi.responses import JSONResponse
     import httpx
     import uvicorn
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.responses import JSONResponse
     QIMING_AVAILABLE = True
 except ImportError:
     QIMING_AVAILABLE = False
+    logger.warning("Qiming channel not available: httpx, uvicorn or fastapi not installed")
     pass
 
 class QimingMessage(BaseModel):
@@ -37,21 +40,22 @@ class QimingResponseMessage(BaseModel):
     """Qiming response message model."""
     class TextMsg(BaseModel):
         content: str
-        is_mentioned: bool = Field(alias="isMentioned", default=True)
-        mention_type: int = Field(alias="mentionType", default=2)
-        mentioned_mobile_list: list[str] = Field(alias="mentionedMobileList", default_factory=list)
+        is_mentioned: bool = Field(alias="isMentioned", default=None)
+        mention_type: int = Field(alias="mentionType", default=None)
+        mentioned_mobile_list: list[str] = Field(alias="mentionedMobileList", default=None)
         group_id: str = Field(alias="groupId")
 
     type: str = Field(alias="type", default="text")
     text_msg: TextMsg = Field(alias="textMsg")
 
-class QimingChannel(Channel):
+
+class QimingChannel(BaseChannel):
     """Qiming channel implementation."""
 
     name = "qiming"
 
-    def __init__(self, name: str, config: dict):
-        super().__init__(name, config)
+    def __init__(self, config: QimingConfig, bus: MessageBus):
+        super().__init__(config, bus)
         self.config: QimingConfig = config
         self._http: httpx.AsyncClient | None = None
         self._app: FastAPI = FastAPI()
@@ -71,7 +75,7 @@ class QimingChannel(Channel):
                 logger.error("Invalid JSON payload in qiming webhook request")
                 raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-            self._handle_message(
+            await self._handle_message(
                 sender_id=message.phone,
                 chat_id=message.group_id,
                 content=message.text_msg.content,
@@ -89,22 +93,29 @@ class QimingChannel(Channel):
         if not msg.content:
             logger.warning("Empty message content to send")
             return
-        
+
+        logger.info(f"Sending message to Qiming: {msg}")
         _body = {
             "textMsg": {
                 "content": msg.content,
-                "mentioned_mobile_list": [msg.sender_id],
-                "group_id": msg.chat_id,
+                "groupId": msg.chat_id,
             }
         }
+        if msg.reply_to:
+            _body["textMsg"]["mentionedMobileList"] = [msg.reply_to]
+            _body["textMsg"]["isMentioned"] = True
+            _body["textMsg"]["mentionType"] = 2
+
         _response_body = QimingResponseMessage(**_body)
+        logger.info(f"Response message to Qiming: {_response_body}")
+        logger.info(f"Webhook URL: {self.config.webhook_url}")
         resp = await self._http.post(
             self.config.webhook_url,
-            json=_response_body.model_dump()
+            json=_response_body.model_dump(exclude_none=True, by_alias=True)
         )
+        logger.info(f"Sent message to Qiming: {resp.status_code} {resp.text}")
         if resp.status_code != 200:
             logger.error(f"Failed to send message to Qiming: {resp.status_code} {resp.text}")
-            return
 
     async def start(self) -> None:
         """Start the Qiming FastAPI server."""
@@ -122,9 +133,9 @@ class QimingChannel(Channel):
         )
          # Run the server
         try:
-            await self._server.serve()
             self._http = httpx.AsyncClient()
             self._running = True
+            await self._server.serve()
         except asyncio.CancelledError:
             logger.info("Qiming channel server cancelled")
         finally:
@@ -153,4 +164,3 @@ class QimingChannel(Channel):
             logger.warning("Qiming channel server not running")
             return
         await self._send_message(msg)
-        pass

@@ -15,7 +15,6 @@ class Base(BaseModel):
 
 class QimingConfig(Base):
     """Qiming channel configuration."""
-    # @TODO: unfinished
     enabled: bool = False
     webhook_url: str = ""  # Webhook URL for Qiming to send messages to
     port: int = 8000  # Port to run the FastAPI server on

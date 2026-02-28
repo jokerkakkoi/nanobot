@@ -136,6 +136,18 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
+
+        # Qiming channel
+        if self.config.channels.qiming.enabled:
+            try:
+                from nanobot.channels.qiming import QimingChannel
+                self.channels["qiming"] = QimingChannel(
+                    self.config.channels.qiming,
+                    self.bus,
+                )
+                logger.info("Qiming channel enabled")
+            except ImportError as e:
+                logger.warning("Qiming channel not available: {}", e)
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
