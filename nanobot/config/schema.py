@@ -18,6 +18,8 @@ class QimingConfig(Base):
     # @TODO: unfinished
     enabled: bool = False
     webhook_url: str = ""  # Webhook URL for Qiming to send messages to
+    port: int = 8000  # Port to run the FastAPI server on
+    host: str = "0.0.0.0"  # Host to bind the FastAPI server to
 
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""

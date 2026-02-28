@@ -1,19 +1,19 @@
 """Qiming channel implementation using FastAPI to receive webhook requests."""
 
-from locale import str
 import asyncio
-
+import json
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from nanobot.config.schema import QimingConfig
+from nanobot.bus.events import OutboundMessage
 
 try:
     # Import packages required for receive qiming webhook requests
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import JSONResponse
+    import httpx
     import uvicorn
-    import json
     QIMING_AVAILABLE = True
 except ImportError:
     QIMING_AVAILABLE = False
@@ -33,6 +33,18 @@ class QimingMessage(BaseModel):
     robot_id: str = Field(alias="robotId")
     text_msg: TextMsg = Field(alias="textMsg")
 
+class QimingResponseMessage(BaseModel):
+    """Qiming response message model."""
+    class TextMsg(BaseModel):
+        content: str
+        is_mentioned: bool = Field(alias="isMentioned", default=True)
+        mention_type: int = Field(alias="mentionType", default=2)
+        mentioned_mobile_list: list[str] = Field(alias="mentionedMobileList", default_factory=list)
+        group_id: str = Field(alias="groupId")
+
+    type: str = Field(alias="type", default="text")
+    text_msg: TextMsg = Field(alias="textMsg")
+
 class QimingChannel(Channel):
     """Qiming channel implementation."""
 
@@ -41,6 +53,7 @@ class QimingChannel(Channel):
     def __init__(self, name: str, config: dict):
         super().__init__(name, config)
         self.config: QimingConfig = config
+        self._http: httpx.AsyncClient | None = None
         self._app: FastAPI = FastAPI()
         self._server: uvicorn.Server = None
         self._setup_routes()
@@ -67,13 +80,38 @@ class QimingChannel(Channel):
                 session_key=None,
             )
 
+    async def _send_message(self, msg: OutboundMessage) -> None:
+        """Send a message through the Qiming channel."""
+
+        if not self._running:
+            logger.warning("Qiming channel server not running")
+            return
+        if not msg.content:
+            logger.warning("Empty message content to send")
+            return
+        
+        _body = {
+            "textMsg": {
+                "content": msg.content,
+                "mentioned_mobile_list": [msg.sender_id],
+                "group_id": msg.chat_id,
+            }
+        }
+        _response_body = QimingResponseMessage(**_body)
+        resp = await self._http.post(
+            self.config.webhook_url,
+            json=_response_body.model_dump()
+        )
+        if resp.status_code != 200:
+            logger.error(f"Failed to send message to Qiming: {resp.status_code} {resp.text}")
+            return
+
     async def start(self) -> None:
         """Start the Qiming FastAPI server."""
         if not QIMING_AVAILABLE:
             logger.error("Qiming FastAPI not installed. Run: pip install -r requirements.txt")
             return
         
-        # @TODO: link port with config
         self._server = uvicorn.Server(
             config=uvicorn.Config(
                 app=self._app,
@@ -85,9 +123,34 @@ class QimingChannel(Channel):
          # Run the server
         try:
             await self._server.serve()
+            self._http = httpx.AsyncClient()
             self._running = True
         except asyncio.CancelledError:
             logger.info("Qiming channel server cancelled")
         finally:
             self._running = False
 
+    async def stop(self) -> None:
+        """Stop the Qiming FastAPI server."""
+        
+        if not self._server or not self._server.started:
+            logger.warning("Qiming channel server not running")
+            return
+        self._server.should_exit = True
+        await self._server.shutdown()
+        self._server = None
+        # Close the shared HTTP client
+        if self._http:
+            await self._http.aclose()
+            self._http = None
+        self._running = False
+        logger.info("Qiming channel server stopped")
+
+    async def send(self, msg: OutboundMessage) -> None:
+        """Send a message through the Qiming channel."""
+
+        if not self._running:
+            logger.warning("Qiming channel server not running")
+            return
+        await self._send_message(msg)
+        pass
