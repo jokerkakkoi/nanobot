@@ -50,6 +50,11 @@ class MemoryStore:
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
 
+    def reinit(self):
+
+        self.memory_file = self.memory_dir / "MEMORY.md"
+        self.history_file = self.memory_dir / "HISTORY.md"
+
     def read_long_term(self) -> str:
         if self.memory_file.exists():
             return self.memory_file.read_text(encoding="utf-8")
@@ -66,6 +71,15 @@ class MemoryStore:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
+    def get_session_memory_context(self,session: Session) -> str:
+        if session.key:
+            self.memory_file = self.memory_dir / f"MEMORY{session.key}.md"
+            self.history_file = self.memory_dir / f"HISTORY{session.key}.md"
+
+        long_term = self.read_long_term()
+        self.reinit()
+        return f"## Long-term Memory\n{long_term}" if long_term else ""
+
     async def consolidate(
         self,
         session: Session,
@@ -79,6 +93,10 @@ class MemoryStore:
 
         Returns True on success (including no-op), False on failure.
         """
+        if session.key:
+            self.memory_file = self.memory_dir / f"MEMORY{session.key}.md"
+            self.history_file = self.memory_dir / f"HISTORY{session.key}.md"
+
         if archive_all:
             old_messages = session.messages
             keep_count = 0
@@ -144,7 +162,13 @@ class MemoryStore:
 
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
+
+            self.reinit()
+
             return True
         except Exception:
             logger.exception("Memory consolidation failed")
+
+            self.reinit()
+
             return False

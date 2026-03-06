@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+
+from nanobot.agent.SessionContext import SessionContextBuilder
+
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -84,6 +87,9 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace)
+
+        self.context = SessionContextBuilder(workspace)
+
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -352,10 +358,17 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.memory_window)
+
+            # messages = self.context.build_messages(
+            #     history=history,
+            #     current_message=msg.content, channel=channel, chat_id=chat_id,
+            # )
+
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content, channel=channel, chat_id=chat_id,session= session
             )
+
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -426,11 +439,19 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
+        # initial_messages = self.context.build_messages(
+        #     history=history,
+        #     current_message=msg.content,
+        #     media=msg.media if msg.media else None,
+        #     channel=msg.channel, chat_id=msg.chat_id,
+        # )
+
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            session= session
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
